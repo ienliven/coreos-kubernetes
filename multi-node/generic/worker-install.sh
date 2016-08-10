@@ -20,7 +20,7 @@ export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
 export DNS_SERVICE_IP=10.3.0.10
 
 # Whether to use Calico for Kubernetes network policy.
-export USE_CALICO=false
+export USE_CALICO=true
 
 # The above settings can optionally be overridden using an environment file:
 ENV_FILE=/run/coreos-kubernetes/options.env
@@ -53,6 +53,26 @@ function init_config {
 }
 
 function init_templates {
+    local TEMPLATE=/etc/systemd/system/rkt-api.service
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+[Unit]
+Description=rkt api-service per-host agent
+Requires=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/rkt api-service --listen=localhost:15441
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
     local TEMPLATE=/etc/systemd/system/kubelet.service
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
@@ -74,7 +94,9 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --cluster_domain=cluster.local \
   --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml \
   --tls-cert-file=/etc/kubernetes/ssl/worker.pem \
-  --tls-private-key-file=/etc/kubernetes/ssl/worker-key.pem
+  --tls-private-key-file=/etc/kubernetes/ssl/worker-key.pem \
+  --container-runtime=rkt \
+  --rkt-path=/usr/bin/rkt
 Restart=always
 RestartSec=10
 
@@ -249,6 +271,7 @@ systemctl stop update-engine; systemctl mask update-engine
 
 systemctl daemon-reload
 systemctl enable flanneld; systemctl start flanneld
+systemctl enable rkt-api; systemctl start rkt-api
 systemctl enable kubelet; systemctl start kubelet
 if [ $USE_CALICO = "true" ]; then
         systemctl enable calico-node; systemctl start calico-node
